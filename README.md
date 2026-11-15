@@ -1,7 +1,7 @@
 # Sagrada Família ticket watch
 
 Checks the official booking page for the basic ticket (entry + audio guide in the app)
-roughly every 75 seconds and sends a Telegram message when any day from
+roughly every 75 seconds (each run lasts ~45 min and starts the next one itself) and sends a Telegram message when any day from
 Mon 16 to Mon 23 Nov 2026 becomes bookable. Notify-only: it never books or pays.
 
 - Weekdays: 2 adults + baby. Sat 21 / Sun 22: 3 adults + baby.

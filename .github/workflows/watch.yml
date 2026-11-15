@@ -1,9 +1,12 @@
 name: Sagrada Familia ticket watch
 
+# Each run checks the ticket page about every 75 s for ~45 min, then starts the
+# next run itself (GitHub's cron is unreliable for new repos). The cron below is
+# only a backup in case the chain ever breaks. The chain stops after Nov 23.
 on:
+  push:
+    branches: [main]
   schedule:
-    # Every 20 min a new run starts; each run keeps checking for ~19 min,
-    # so the page is checked roughly every 75 s around the clock.
     - cron: "*/20 * * * *"
   workflow_dispatch:
     inputs:
@@ -16,10 +19,14 @@ concurrency:
   group: sagrada-watch
   cancel-in-progress: false
 
+permissions:
+  contents: read
+  actions: write   # lets the run start the next run
+
 jobs:
   watch:
     runs-on: ubuntu-latest
-    timeout-minutes: 25
+    timeout-minutes: 55
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -32,6 +39,16 @@ jobs:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
           TEST_ALERT: ${{ inputs.test_alert && '1' || '0' }}
-          LOOP_MINUTES: "19"
+          LOOP_MINUTES: "45"
           INTERVAL_SECONDS: "75"
         run: python checker.py
+      - name: Start next run
+        if: ${{ always() && !inputs.test_alert }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if [ "$(TZ=Europe/Madrid date +%Y%m%d)" -le 20261123 ]; then
+            gh workflow run watch.yml --repo "$GITHUB_REPOSITORY" --ref main
+          else
+            echo "Past Nov 23 - stopping the chain."
+          fi
