@@ -92,8 +92,14 @@ def telegram_photo(png: bytes, caption: str) -> None:
 def open_dates_and_slots(page) -> dict:
     """Return {iso_date: [time slots]} for target dates that are bookable now."""
     page.goto(PAGE_URL, wait_until="domcontentloaded", timeout=60_000)
-    page.wait_for_selector("td.CalendarDay", timeout=45_000)
+    # Day cells of the hidden neighbouring months are never visible, so only
+    # wait for them to exist in the page, not to be visible.
+    page.wait_for_selector("td.CalendarDay", state="attached", timeout=45_000)
     page.wait_for_timeout(2500)  # let the availability request repaint the calendar
+    try:  # decline optional cookies so the banner can't cover the calendar
+        page.get_by_role("button", name="Reject optional").click(timeout=2000)
+    except Exception:
+        pass
 
     # The widget also renders hidden neighbouring months, so only look inside
     # the month block captioned "November 2026". Each day cell carries an
