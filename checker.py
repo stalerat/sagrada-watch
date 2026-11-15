@@ -47,6 +47,8 @@ def log(*a):
 
 
 def telegram(text: str) -> None:
+    if os.environ.get("PROBE") == "1":
+        return
     token = os.environ.get("TELEGRAM_BOT_TOKEN")
     chat = os.environ.get("TELEGRAM_CHAT_ID")
     if not token or not chat:
