@@ -168,10 +168,15 @@ def main() -> int:
     error_alert_sent = False
 
     with sync_playwright() as p:
-        browser = p.chromium.launch(
-            headless=True, args=["--disable-blink-features=AutomationControlled"],
-            executable_path=os.environ.get("CHROME_PATH") or None,
+        launch = dict(
+            headless=os.environ.get("HEADED") != "1",
+            args=["--disable-blink-features=AutomationControlled"],
         )
+        if os.environ.get("CHROME_PATH"):
+            launch["executable_path"] = os.environ["CHROME_PATH"]
+        elif os.environ.get("CHANNEL"):
+            launch["channel"] = os.environ["CHANNEL"]  # e.g. "chrome" = real Google Chrome
+        browser = p.chromium.launch(**launch)
         ctx = browser.new_context(
             locale="en-GB",
             timezone_id="Europe/Madrid",
@@ -205,6 +210,8 @@ def main() -> int:
                 if not diag_sent:
                     diag_sent = True
                     print("::notice title=diag::calendar read OK; open targets: " + (json.dumps(found) or "none"), flush=True)
+                    if os.environ.get("PROBE") == "1":
+                        open("probe.txt", "w").write("OK: calendar read; open targets: " + json.dumps(found))
                 if new:
                     telegram(format_alert(new))
                     alerted.update(new)
@@ -230,6 +237,12 @@ def main() -> int:
                     )
                     log(diag)
                     print("::warning title=diag::" + diag.replace("\n", " | ")[:900], flush=True)
+                    if os.environ.get("PROBE") == "1":
+                        open("probe.txt", "w").write(diag)
+                        try:
+                            open("probe.png", "wb").write(page.screenshot(full_page=True))
+                        except Exception:
+                            pass
                     if os.environ.get("SEND_DIAG") == "1":
                         telegram(diag[:4000])
                         try:

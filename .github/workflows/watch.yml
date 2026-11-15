@@ -4,6 +4,8 @@ name: Sagrada Familia ticket watch
 # next run itself (GitHub's cron is unreliable for new repos). The cron below is
 # only a backup in case the chain ever breaks. The chain stops after Nov 23.
 on:
+  push:
+    branches: [main]
   schedule:
     - cron: "*/20 * * * *"
   workflow_dispatch:
@@ -15,10 +17,11 @@ on:
 
 concurrency:
   group: sagrada-watch
-  cancel-in-progress: false
+  # a code push replaces the run in progress (cancelled runs don't chain)
+  cancel-in-progress: ${{ github.event_name == 'push' }}
 
 permissions:
-  contents: read
+  contents: write  # only used to publish probe results to the 'diag' branch
   actions: write   # lets the run start the next run
 
 jobs:
@@ -38,7 +41,17 @@ jobs:
         env:
           LOOP_MINUTES: "0"
           PROBE: "1"
-        run: python checker.py
+          HEADED: "1"
+          CHANNEL: chrome
+        run: xvfb-run -a python checker.py
+      - name: Publish probe result to 'diag' branch
+        if: ${{ !inputs.test_alert }}
+        continue-on-error: true
+        run: |
+          git config user.name watcher && git config user.email watcher@users.noreply.github.com
+          git checkout -q --orphan diag && git rm -rfq --cached . > /dev/null
+          echo "$(date -u +%FT%TZ) headed real Chrome" >> probe.txt
+          git add -f probe.txt $( [ -f probe.png ] && echo probe.png ) && git commit -qm probe && git push -qf origin diag
       - name: Check availability
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
@@ -46,7 +59,9 @@ jobs:
           TEST_ALERT: ${{ inputs.test_alert && '1' || '0' }}
           LOOP_MINUTES: "45"
           INTERVAL_SECONDS: "75"
-        run: python checker.py
+          HEADED: "1"
+          CHANNEL: chrome
+        run: xvfb-run -a python checker.py
       - name: Start next run
         if: ${{ !cancelled() && !inputs.test_alert }}
         env:
