@@ -1,0 +1,37 @@
+name: Sagrada Familia ticket watch
+
+on:
+  schedule:
+    # Every 20 min a new run starts; each run keeps checking for ~19 min,
+    # so the page is checked roughly every 75 s around the clock.
+    - cron: "*/20 * * * *"
+  workflow_dispatch:
+    inputs:
+      test_alert:
+        description: "Send a Telegram test message instead of checking"
+        type: boolean
+        default: false
+
+concurrency:
+  group: sagrada-watch
+  cancel-in-progress: false
+
+jobs:
+  watch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: pip install -r requirements.txt && python -m playwright install --with-deps chromium
+      - name: Check availability
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          TEST_ALERT: ${{ inputs.test_alert && '1' || '0' }}
+          LOOP_MINUTES: "19"
+          INTERVAL_SECONDS: "75"
+        run: python checker.py
