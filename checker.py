@@ -234,7 +234,9 @@ def main() -> int:
                             telegram_photo(page.screenshot(full_page=False), "screen seen by the watcher")
                         except Exception as pe:
                             log(f"screenshot failed: {pe}")
-                if consecutive_errors >= 4 and not error_alert_sent:
+                # warn at most twice a day (09h and 18h Madrid) instead of every run
+                quiet = dt.datetime.now(MADRID).hour not in (9, 18)
+                if consecutive_errors >= 4 and not error_alert_sent and not quiet:
                     telegram(f"⚠️ Sagrada watcher can't read the ticket page right now ({type(e).__name__}). It keeps trying, but check manually meanwhile: {PRODUCT_URL}")
                     error_alert_sent = True
             if time.time() + interval > deadline:
