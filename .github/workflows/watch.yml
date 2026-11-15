@@ -17,7 +17,8 @@ on:
 
 concurrency:
   group: sagrada-watch
-  cancel-in-progress: false
+  # a new code push replaces the run in progress
+  cancel-in-progress: ${{ github.event_name == 'push' }}
 
 permissions:
   contents: read
@@ -39,6 +40,7 @@ jobs:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
           TEST_ALERT: ${{ inputs.test_alert && '1' || '0' }}
+          SEND_DIAG: ${{ github.event_name == 'push' && '1' || '0' }}
           LOOP_MINUTES: "45"
           INTERVAL_SECONDS: "75"
         run: python checker.py

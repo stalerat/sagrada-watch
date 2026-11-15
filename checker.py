@@ -62,6 +62,31 @@ def telegram(text: str) -> None:
         r.read()
 
 
+def telegram_photo(png: bytes, caption: str) -> None:
+    token = os.environ.get("TELEGRAM_BOT_TOKEN")
+    chat = os.environ.get("TELEGRAM_CHAT_ID")
+    if not token or not chat:
+        return
+    boundary = "----sagradawatch"
+    parts = []
+    for name, val in (("chat_id", chat), ("caption", caption)):
+        parts.append(
+            f'--{boundary}\r\nContent-Disposition: form-data; name="{name}"\r\n\r\n{val}\r\n'.encode()
+        )
+    parts.append(
+        f'--{boundary}\r\nContent-Disposition: form-data; name="photo"; filename="s.png"\r\n'
+        f"Content-Type: image/png\r\n\r\n".encode() + png + b"\r\n"
+    )
+    parts.append(f"--{boundary}--\r\n".encode())
+    req = urllib.request.Request(
+        f"https://api.telegram.org/bot{token}/sendPhoto",
+        data=b"".join(parts),
+        headers={"Content-Type": f"multipart/form-data; boundary={boundary}"},
+    )
+    with urllib.request.urlopen(req, timeout=30) as r:
+        r.read()
+
+
 def open_dates_and_slots(page) -> dict:
     """Return {iso_date: [time slots]} for target dates that are bookable now."""
     page.goto(PAGE_URL, wait_until="domcontentloaded", timeout=60_000)
@@ -141,15 +166,45 @@ def main() -> int:
     error_alert_sent = False
 
     with sync_playwright() as p:
-        browser = p.chromium.launch(headless=True)
-        ctx = browser.new_context(locale="en-GB", timezone_id="Europe/Madrid")
+        browser = p.chromium.launch(
+            headless=True, args=["--disable-blink-features=AutomationControlled"],
+            executable_path=os.environ.get("CHROME_PATH") or None,
+        )
+        ctx = browser.new_context(
+            locale="en-GB",
+            timezone_id="Europe/Madrid",
+            viewport={"width": 1366, "height": 900},
+            user_agent=(
+                "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 "
+                "(KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36"
+            ),
+        )
         page = ctx.new_page()
+        net = {"doc": None, "bad": []}
+
+        def on_response(r):
+            try:
+                if r.request.resource_type == "document" and "sagradafamilia" in r.url:
+                    net["doc"] = r.status
+                elif r.status >= 400 and ("clorian" in r.url or "sagradafamilia" in r.url):
+                    net["bad"].append(f"{r.status} {r.url.split('?')[0][-70:]}")
+                    net["bad"] = net["bad"][-6:]
+            except Exception:
+                pass
+
+        page.on("response", on_response)
+        diag_sent = False
         while True:
             try:
                 found = open_dates_and_slots(page)
                 consecutive_errors = 0
                 new = {d: s for d, s in found.items() if d not in alerted}
                 log("open target dates:", json.dumps(found) if found else "none")
+                if not diag_sent and os.environ.get("SEND_DIAG") == "1":
+                    diag_sent = True
+                    print("::notice title=diag::calendar read OK; open targets: " + (json.dumps(found) or "none"), flush=True)
+                    telegram("✅ Watcher fixed: it can now read the ticket calendar. "
+                             "Nov 16–23 currently sold out" if not found else "✅ Watcher can read the calendar.")
                 if new:
                     telegram(format_alert(new))
                     alerted.update(new)
@@ -158,6 +213,28 @@ def main() -> int:
             except (PWTimeout, Exception) as e:
                 consecutive_errors += 1
                 log(f"check failed ({consecutive_errors}): {e}")
+                if not diag_sent and os.environ.get("SEND_DIAG") == "1":
+                    diag_sent = True
+                    try:
+                        body = page.inner_text("body", timeout=5000)[:400]
+                    except Exception:
+                        body = "(no body)"
+                    try:
+                        title = page.title()
+                    except Exception:
+                        title = "?"
+                    diag = (
+                        f"🔧 Diagnostic for Claude\nerror: {str(e)[:200]}\nurl: {page.url}\n"
+                        f"title: {title}\npage status: {net['doc']}\n"
+                        f"failed requests: {net['bad'] or 'none'}\nbody: {body}"
+                    )
+                    log(diag)
+                    print("::warning title=diag::" + diag.replace("\n", " | ")[:900], flush=True)
+                    telegram(diag[:4000])
+                    try:
+                        telegram_photo(page.screenshot(full_page=False), "screen seen by the watcher")
+                    except Exception as pe:
+                        log(f"screenshot failed: {pe}")
                 if consecutive_errors >= 4 and not error_alert_sent:
                     telegram(f"⚠️ Sagrada watcher can't read the ticket page right now ({type(e).__name__}). It keeps trying, but check manually meanwhile: {PRODUCT_URL}")
                     error_alert_sent = True
