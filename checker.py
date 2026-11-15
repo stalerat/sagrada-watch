@@ -17,6 +17,7 @@ import datetime as dt
 import json
 import os
 import random
+import re
 import sys
 import time
 import urllib.parse
@@ -38,6 +39,9 @@ TARGETS = {
     "2026-11-22": "3 adults + baby",
     "2026-11-23": "2 adults + baby",
 }
+
+# adult tickets needed per date; the baby's free "Under 11s" ticket may need one more seat
+ADULTS = {d: (3 if v.startswith("3") else 2) for d, v in TARGETS.items()}
 
 MADRID = dt.timezone(dt.timedelta(hours=1))  # CET (no DST in late November)
 
@@ -120,7 +124,7 @@ def open_dates_and_slots(page) -> dict:
         except ValueError:
             continue
         if iso in TARGETS:
-            found[iso] = []
+            found[iso] = None  # None = open, but times not read (yet)
 
     # Best effort: click each open date and read the offered times.
     for iso in found:
@@ -132,20 +136,35 @@ def open_dates_and_slots(page) -> dict:
             page.wait_for_timeout(3500)
             text = page.locator("main").inner_text()
             after = text.split("AT WHAT TIME?", 1)[-1].split("HOW MANY PEOPLE", 1)[0]
-            slots = sorted(
-                {t for t in after.split() if len(t) == 5 and t[2] == ":" and t.replace(":", "").isdigit()}
-            )
+            # Times are listed one per line; a nearly full slot is followed by
+            # a line like "1 ticket" / "3 tickets" (no line = plenty left).
+            slots = []
+            for line in (l.strip() for l in after.splitlines()):
+                if re.fullmatch(r"\d{2}:\d{2}", line):
+                    slots.append([line, None])
+                elif slots and re.fullmatch(r"\d+ tickets?", line):
+                    slots[-1][1] = int(line.split()[0])
             found[iso] = slots
         except Exception as e:  # times are a bonus; the day alert is what matters
             log(f"could not read times for {iso}: {e}")
     return found
 
 
+def usable(iso: str, slots) -> list:
+    """Slots with room for the whole group (None = couldn't read times)."""
+    if slots is None:
+        return None
+    return [sl for sl in slots if sl[1] is None or sl[1] >= ADULTS[iso]]
+
+
 def format_alert(found: dict) -> str:
     lines = ["🎟 Sagrada Família tickets just opened!"]
     for iso, slots in sorted(found.items()):
         d = dt.date.fromisoformat(iso)
-        times = ", ".join(slots[:12]) if slots else "open the page to see times"
+        if slots is None:
+            times = "open the page to see times"
+        else:
+            times = ", ".join(t if left is None else f"{t} (only {left} left)" for t, left in slots[:12])
         lines.append(f"• {d:%a %d %b} ({TARGETS[iso]}): {times}")
     lines.append("")
     lines.append("Book now (slots go fast): " + PRODUCT_URL)
@@ -211,7 +230,12 @@ def main() -> int:
             try:
                 found = open_dates_and_slots(page)
                 consecutive_errors = 0
-                new = {d: s for d, s in found.items() if d not in alerted}
+                good = {}
+                for d, sl in found.items():
+                    u = usable(d, sl)
+                    if u is None or u:
+                        good[d] = u
+                new = {d: sl for d, sl in good.items() if d not in alerted}
                 log("open target dates:", json.dumps(found) if found else "none")
                 if not diag_sent:
                     diag_sent = True
@@ -222,7 +246,7 @@ def main() -> int:
                     telegram(format_alert(new))
                     alerted.update(new)
                 # if a date sells out again, allow a fresh alert when it reopens
-                alerted &= set(found)
+                alerted &= set(good)
             except (PWTimeout, Exception) as e:
                 consecutive_errors += 1
                 log(f"check failed ({consecutive_errors}): {e}")
