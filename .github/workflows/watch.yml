@@ -4,8 +4,6 @@ name: Sagrada Familia ticket watch
 # next run itself (GitHub's cron is unreliable for new repos). The cron below is
 # only a backup in case the chain ever breaks. The chain stops after Nov 23.
 on:
-  push:
-    branches: [main]
   schedule:
     - cron: "*/20 * * * *"
   workflow_dispatch:
@@ -17,8 +15,7 @@ on:
 
 concurrency:
   group: sagrada-watch
-  # a new code push replaces the run in progress
-  cancel-in-progress: ${{ github.event_name == 'push' }}
+  cancel-in-progress: false
 
 permissions:
   contents: read
@@ -40,12 +37,11 @@ jobs:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
           TEST_ALERT: ${{ inputs.test_alert && '1' || '0' }}
-          SEND_DIAG: ${{ github.event_name == 'push' && '1' || '0' }}
           LOOP_MINUTES: "45"
           INTERVAL_SECONDS: "75"
         run: python checker.py
       - name: Start next run
-        if: ${{ always() && !inputs.test_alert }}
+        if: ${{ !cancelled() && !inputs.test_alert }}
         env:
           GH_TOKEN: ${{ github.token }}
         run: |

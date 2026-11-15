@@ -200,11 +200,9 @@ def main() -> int:
                 consecutive_errors = 0
                 new = {d: s for d, s in found.items() if d not in alerted}
                 log("open target dates:", json.dumps(found) if found else "none")
-                if not diag_sent and os.environ.get("SEND_DIAG") == "1":
+                if not diag_sent:
                     diag_sent = True
                     print("::notice title=diag::calendar read OK; open targets: " + (json.dumps(found) or "none"), flush=True)
-                    telegram("✅ Watcher fixed: it can now read the ticket calendar. "
-                             "Nov 16–23 currently sold out" if not found else "✅ Watcher can read the calendar.")
                 if new:
                     telegram(format_alert(new))
                     alerted.update(new)
@@ -213,7 +211,7 @@ def main() -> int:
             except (PWTimeout, Exception) as e:
                 consecutive_errors += 1
                 log(f"check failed ({consecutive_errors}): {e}")
-                if not diag_sent and os.environ.get("SEND_DIAG") == "1":
+                if not diag_sent:
                     diag_sent = True
                     try:
                         body = page.inner_text("body", timeout=5000)[:400]
@@ -230,11 +228,12 @@ def main() -> int:
                     )
                     log(diag)
                     print("::warning title=diag::" + diag.replace("\n", " | ")[:900], flush=True)
-                    telegram(diag[:4000])
-                    try:
-                        telegram_photo(page.screenshot(full_page=False), "screen seen by the watcher")
-                    except Exception as pe:
-                        log(f"screenshot failed: {pe}")
+                    if os.environ.get("SEND_DIAG") == "1":
+                        telegram(diag[:4000])
+                        try:
+                            telegram_photo(page.screenshot(full_page=False), "screen seen by the watcher")
+                        except Exception as pe:
+                            log(f"screenshot failed: {pe}")
                 if consecutive_errors >= 4 and not error_alert_sent:
                     telegram(f"⚠️ Sagrada watcher can't read the ticket page right now ({type(e).__name__}). It keeps trying, but check manually meanwhile: {PRODUCT_URL}")
                     error_alert_sent = True
